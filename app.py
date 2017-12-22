@@ -7,9 +7,9 @@ app = Flask(__name__)
 app.config['MONGO_DBNAME'] = 'connect_test'
 app.config['MONGO_URI'] = 'mongodb://Albert:stocksstocksstocks@ds161016.mlab.com:61016/financewebapp' # figure out how to hide username and password
 
-mongo = PyMongo(app)
+app.secret_key = 'mysecret'
 
-user = None
+mongo = PyMongo(app)
 
 @app.route('/')
 def home_page():
@@ -18,25 +18,29 @@ def home_page():
 @app.route('/login', methods=['POST'])
 def login():
     users = mongo.db.users
-    login_user = users.find_one({'name':request.form['username']})
+    login_user = users.find_one({'username':request.form['username']})
 
     if login_user:
         if bcrypt.hashpw(request.form['password'].encode('utf-8'), login_user['password']) == login_user['password']:
-            global user
-            user = User(request.form['username'])
-            user.watchlist = [Stock(symbol) for symbol in login_user['watchlist']]
+            session['username'] = request.form['username']
+            session['watchlist'] = [Stock(symbol).__dict__ for symbol in login_user['watchlist']]
         else:
             return 'Invalid username/password combination'
     else:
         return 'Invalid username/password combination'
 
-    user.sort_watchlist()
+    session['watchlist'] = sorted(session['watchlist'], key=lambda x: x['week_percent_change'], reverse=True)
+
     return redirect(url_for('watchlist'))
 
 @app.route('/watchlist')
 def watchlist():
-    global user
-    return render_template('watchlist.html', watchlist=user.watchlist, fiveBest=user.five_best_performers(), fiveWorst=user.five_worst_performers())
+    session['watchlist'] = sorted(session['watchlist'], key=lambda x: x['week_percent_change'], reverse=True)
+    wlist = session['watchlist']
+    best = session['watchlist'][0:5]
+    worst = reversed(session['watchlist'][-5:])
+
+    return render_template('watchlist.html', watchlist=wlist, fiveBest=best, fiveWorst=worst)
 
 @app.route('/register')
 def register():
@@ -44,8 +48,8 @@ def register():
 
 @app.route('/confirm_registration', methods=['POST'])
 def confirm_registration():
-    users = mongo.db.users # create a new collection called users
-    existing_user = users.find_one({'name' : request.form['username']})
+    users = mongo.db.users
+    existing_user = users.find_one({'username' : request.form['username']})
 
     if existing_user is None:
         hashed_password = bcrypt.hashpw(request.form['password'].encode('utf-8'), bcrypt.gensalt())
@@ -53,44 +57,61 @@ def confirm_registration():
         return 'That username already exists'
 
     if request.form['password'] == request.form['confirm']:
-        users.insert({'name' : request.form['username'], 'password': hashed_password, 'watchlist': []})
+        users.insert({
+            'name': request.form['name'],
+            'email': request.form['email'],
+            'username': request.form['username'],
+            'password': hashed_password,
+            'watchlist': []
+        })
     else:
         return 'The passwords did not match'
-
-    print('successfully created')
 
     return redirect(url_for('home_page')) # get the user back to the homepage to log in
 
 @app.route('/addStock', methods=['POST'])
 def add_stock():
-    symbol = request.form['symbol']
-    global User
-    user.insert_stock(symbol)
-    user.sort_watchlist()
+    # add stock to session watchlist
+    symbol = request.form['symbol'].upper()
+    newStock = Stock(symbol)
+
+    if newStock.week_percent_change is None:
+        return symbol.upper() + " is either not a valid stock symbol or is not available"
+
+    currentList = session['watchlist']
+
+    # make sure the stock is not already on the user's watchlist
+    for stock in currentList:
+        if stock['companySymbol'] == symbol:
+            return symbol + " is already on your watchlist"
+
+    currentList.append(newStock.__dict__)
+    session['watchlist'] = currentList
 
     # add stock to mongodb watchlist
     users = mongo.db.users
-
-    current_user = users.find_one({'name' : user.username})
+    current_user = users.find_one({'username' : session['username']})
     users.update({'_id' : current_user['_id']}, {'$push': {'watchlist': symbol}})
-
 
     return redirect(url_for('watchlist'))
 
 @app.route('/removeStock', methods=['POST'])
 def remove_stock():
-    symbol = request.form['symbol']
-    global user
-    user.remove_stock(symbol)
+    # add stock to session watchlist
+    symbol = request.form['symbol'].upper()
+    currentList = session['watchlist']
+    for stock in currentList:
+        if stock['companySymbol'] == symbol:
+            currentList.remove(stock)
+
+    session['watchlist'] = currentList
 
     # remove stock from mongodb watchlist
     users = mongo.db.users
-
-    current_user = users.find_one({'name' : user.username})
+    current_user = users.find_one({'username' : session['username']})
     users.update({'_id' : current_user['_id']}, {'$pull': {'watchlist': symbol}})
 
     return redirect(url_for('watchlist'))
-
 
 if __name__ == '__main__':
     app.run()

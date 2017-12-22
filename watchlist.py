@@ -1,7 +1,5 @@
 import quandl
 import datetime
-import os.path
-from copy import deepcopy
 
 def get_week_percent_change(symbol):
     quandl.ApiConfig.api_key = '3_sxFydrNzVvGNNFTQbd'
@@ -40,26 +38,4 @@ class Stock:
         else:
             self.current_price = None
             self.week_percent_change = None
-
-class User:
-    def __init__(self, username):
-        self.username = username
-        self.watchlist = []
-
-    def insert_stock(self, companySymbol):
-        self.watchlist.append(Stock(companySymbol))
-
-    def remove_stock(self, companySymbol):
-        for stock in self.watchlist:
-            if stock.companySymbol == companySymbol:
-                self.watchlist.remove(stock)
-
-    def sort_watchlist(self):
-        self.watchlist.sort(key=lambda x: x.week_percent_change, reverse=True)
-
-    def five_best_performers(self):
-        return self.watchlist[0:5]
-
-    def five_worst_performers(self):
-        return self.watchlist[-5:]
 
